@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Finder Tool - Find Real Jobs Worldwide in One Click | 20+ Countries</title>
+<meta name="description" content="Job Finder Tool helps you find real jobs worldwide in one click. Direct links to 20+ countries including Pakistan, India, USA, UK, UAE. Search government jobs, private jobs, police jobs, IT jobs instantly. Free forever.">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    
+    *, *::before, *::after { 
+        box-sizing: border-box; 
+    }
+    
+    * { 
+        font-family: 'Inter', sans-serif; 
+    }
+    
+    html, body {
+        overflow-x: hidden;
+        width: 100%;
+    }
+    
+    body {
+        max-width: 100vw;
+    }
+    
+    .hero-gradient {
+        background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+    }
+    
+    .btn-gradient {
+        background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .btn-gradient:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 24px rgba(59, 130, 246, 0.4);
+        filter: brightness(1.1);
+    }
+    
+    .quick-btn {
+        transition: all 0.2s ease;
+    }
+    
+    .quick-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    
+    .portal-card {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        width: 100%;
+    }
+    
+    .portal-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 28px rgba(0,0,0,0.12);
+    }
+    
+    .animate-slide-up {
+        animation: slideUp 0.5s ease-out;
+    }
+    
+    @keyframes slideUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    select, input {
+        background-image: none;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    select {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+        background-position: right 0.75rem center;
+        background-repeat: no-repeat;
+        background-size: 1.5em 1.5em;
+    }
+    
+    .main-container {
+        max-width: 1200px;
+        margin-left: auto;
+        margin-right: auto;
+        width: 100%;
+    }
+    
+    h1 {
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+    
+    @media (max-width: 640px) {
+        h1 {
+            line-height: 1.2;
+        }
+    }
+    
+    .article-content {
+        max-width: 900px;
+        margin: 0 auto;
+    }
+    
+    .article-content p {
+        line-height: 1.8;
+        color: #334155;
+        margin-bottom: 1.25rem;
+    }
+    
+    .article-content h1 {
+        font-size: 2.25rem;
+        color: #0f172a;
+        font-weight: 800;
+        margin-bottom: 1.5rem;
+        line-height: 1.2;
+    }
+    
+    .article-content h2 {
+        font-size: 1.75rem;
+        color: #1e293b;
+        font-weight: 700;
+        margin-top: 2.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #e2e8f0;
+    }
+    
+    .article-content h3 {
+        font-size: 1.25rem;
+        color: #334155;
+        font-weight: 700;
+        margin-top: 1.75rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    .article-content ul {
+        list-style: none;
+        padding-left: 0;
+        margin-bottom: 1.5rem;
+    }
+    
+    .article-content ul li {
+        padding-left: 1.75rem;
+        position: relative;
+        margin-bottom: 0.75rem;
+        line-height: 1.7;
+        color: #475569;
+    }
+    
+    .article-content ul li:before {
+        content: "✓";
+        position: absolute;
+        left: 0;
+        color: #3b82f6;
+        font-weight: 700;
+        font-size: 1.1rem;
+    }
+    
+    .article-content strong {
+        color: #1e293b;
+        font-weight: 600;
+    }
+    
+    @media (max-width: 640px) {
+        .article-content h1 {
+            font-size: 1.75rem;
+        }
+        .article-content h2 {
+            font-size: 1.5rem;
+        }
+        .article-content h3 {
+            font-size: 1.125rem;
+        }
+    }
+</style>
+</head>
+<body class="bg-slate-50">
+    <!-- Header Section -->
+    <header class="hero-gradient text-white py-12 md:py-16 lg:py-20">
+        <div class="main-container px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-14 h-14 md:w-16 md:h-16 bg-white/10 backdrop-blur-md rounded-2xl mb-6">
+                    <i class="fas fa-briefcase text-2xl md:text-3xl"></i>
+                </div>
+                <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold mb-4 leading-tight px-2">
+                    Job Finder Tool<br class="hidden sm:block">Find Jobs Worldwide
+                </h1>
+                <p class="text-base md:text-lg lg:text-xl text-slate-300 max-w-2xl mx-auto px-4">
+                    Type any job title, select your country — get <span class="text-white font-semibold">direct links</span> to every major job platform.
+                </p>
+            </div>
+
+            <!-- Country Chips -->
+            <div class="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-8 md:mb-12 px-2">
+                <div class="flex items-center space-x-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white/10 backdrop-blur-md rounded-full border border-white/20">
+                    <span class="text-lg sm:text-xl">🇵🇰</span>
+                    <span class="text-xs sm:text-sm font-semibold whitespace-nowrap">Pakistan</span>
+                </div>
+                <div class="flex items-center space-x-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white/10 backdrop-blur-md rounded-full border border-white/20">
+                    <span class="text-lg sm:text-xl">🇮🇳</span>
+                    <span class="text-xs sm:text-sm font-semibold whitespace-nowrap">India</span>
+                </div>
+                <div class="flex items-center space-x-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white/10 backdrop-blur-md rounded-full border border-white/20">
+                    <i class="fas fa-globe text-base sm:text-lg"></i>
+                    <span class="text-xs sm:text-sm font-semibold whitespace-nowrap">Global</span>
+                </div>
+            </div>
+
+            <!-- Search Card -->
+            <div class="max-w-4xl mx-auto bg-white rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 md:p-8">
+                <div class="flex items-center space-x-3 mb-6">
+                    <div class="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-search text-white text-lg sm:text-xl"></i>
+                    </div>
+                    <h2 class="text-xl sm:text-2xl font-bold text-gray-900">Search Jobs</h2>
+                </div>
+
+                <div class="space-y-4 sm:space-y-5">
+                    <!-- Job Title -->
+                    <div class="w-full">
+                        <label class="block text-xs sm:text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">Job Title / Skills</label>
+                        <input type="text" id="jobTitle" placeholder="e.g. Police Officer, Software Engineer, Doctor" 
+                            class="w-full px-3 sm:px-4 py-3 sm:py-3.5 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-gray-900 font-medium text-sm sm:text-base">
+                    </div>
+
+                    <!-- Country & Province -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                        <div class="w-full">
+                            <label class="block text-xs sm:text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">Country</label>
+                            <select id="countrySelect" class="w-full px-3 sm:px-4 py-3 sm:py-3.5 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none appearance-none bg-white text-gray-900 font-medium text-sm sm:text-base">
+                                <option value="">All Countries</option>
+                            </select>
+                        </div>
+                        <div class="w-full">
+                            <label class="block text-xs sm:text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">Province / State</label>
+                            <select id="stateSelect" class="w-full px-3 sm:px-4 py-3 sm:py-3.5 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none appearance-none bg-white text-gray-900 font-medium text-sm sm:text-base">
+                                <option value="">Any Location</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- City & Experience -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                        <div class="w-full">
+                            <label class="block text-xs sm:text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">City (Optional)</label>
+                            <input type="text" id="cityInput" placeholder="e.g. Karachi, Lahore, Mumbai..." 
+                                class="w-full px-3 sm:px-4 py-3 sm:py-3.5 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-gray-900 font-medium text-sm sm:text-base">
+                        </div>
+                        <div class="w-full">
+                            <label class="block text-xs sm:text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">Experience Level</label>
+                            <select id="experienceSelect" class="w-full px-3 sm:px-4 py-3 sm:py-3.5 rounded-xl border-2 border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none appearance-none bg-white text-gray-900 font-medium text-sm sm:text-base">
+                                <option value="">Any Level</option>
+                                <option value="entry">Entry Level</option>
+                                <option value="mid">Mid Level</option>
+                                <option value="senior">Senior Level</option>
+                                <option value="executive">Executive</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Quick Buttons -->
+                    <div class="w-full">
+                        <label class="block text-xs sm:text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Quick Search</label>
+                        <div class="flex flex-wrap gap-2">
+                            <button class="quick-btn px-3 sm:px-4 py-2 sm:py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs sm:text-sm font-semibold border border-blue-200" onclick="quickSearch('Police Officer')">
+                                👮 Police
+                            </button>
+                            <button class="quick-btn px-3 sm:px-4 py-2 sm:py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl text-xs sm:text-sm font-semibold border border-purple-200" onclick="quickSearch('Software Engineer')">
+                                💻 Engineer
+                            </button>
+                            <button class="quick-btn px-3 sm:px-4 py-2 sm:py-2.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-xl text-xs sm:text-sm font-semibold border border-green-200" onclick="quickSearch('Doctor')">
+                                🩺 Doctor
+                            </button>
+                            <button class="quick-btn px-3 sm:px-4 py-2 sm:py-2.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-xl text-xs sm:text-sm font-semibold border border-yellow-200" onclick="quickSearch('Teacher')">
+                                📚 Teacher
+                            </button>
+                            <button class="quick-btn px-3 sm:px-4 py-2 sm:py-2.5 bg-pink-50 hover:bg-pink-100 text-pink-700 rounded-xl text-xs sm:text-sm font-semibold border border-pink-200" onclick="quickSearch('Nurse')">
+                                🏥 Nurse
+                            </button>
+                            <button class="quick-btn px-3 sm:px-4 py-2 sm:py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs sm:text-sm font-semibold border border-indigo-200" onclick="quickSearch('Accountant')">
+                                💼 Accountant
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Search Button -->
+                    <button id="searchBtn" onclick="searchJobs()" class="btn-gradient w-full py-3.5 sm:py-4 rounded-xl text-white font-bold text-base sm:text-lg flex items-center justify-center space-x-2 shadow-lg">
+                        <span>Find Jobs Directly</span>
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+
+                <!-- Tagline -->
+                <div class="mt-6 pt-6 border-t border-gray-100">
+                    <div class="flex items-center justify-center space-x-3 text-gray-600">
+                        <i class="fas fa-briefcase text-blue-600"></i>
+                        <p class="text-xs sm:text-sm font-medium text-center">Your next job is one search away</p>
+                    </div>
+                    <p class="text-center text-xs text-gray-500 mt-2 px-2">Direct links to all major platforms + expanded Pakistan & India coverage.</p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Results Section -->
+    <section id="resultsSection" class="hidden main-container px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 sm:mb-8">
+            <h3 class="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">
+                Direct Job Search Links
+            </h3>
+            <button onclick="clearResults()" class="text-sm text-gray-500 hover:text-gray-700 font-semibold flex items-center space-x-1">
+                <i class="fas fa-times"></i>
+                <span>Clear</span>
+            </button>
+        </div>
+        <div id="resultsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+            <!-- Results will be inserted here -->
+        </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="hero-gradient text-white py-12 sm:py-16">
+        <div class="main-container px-4 sm:px-6 lg:px-8">
+            <h2 class="text-2xl sm:text-3xl md:text-4xl font-bold text-center mb-8 sm:mb-12 px-4">How it works</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
+                <div class="text-center px-4">
+                    <div class="w-14 h-14 sm:w-16 sm:h-16 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl sm:text-3xl font-bold">
+                        1
+                    </div>
+                    <h3 class="text-lg sm:text-xl font-bold mb-2">Enter Job Title</h3>
+                    <p class="text-sm sm:text-base text-slate-300">Type any job or skill you want to search for</p>
+                </div>
+                <div class="text-center px-4">
+                    <div class="w-14 h-14 sm:w-16 sm:h-16 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl sm:text-3xl font-bold">
+                        2
+                    </div>
+                    <h3 class="text-lg sm:text-xl font-bold mb-2">Pick Country & Location</h3>
+                    <p class="text-sm sm:text-base text-slate-300">Select province/city to narrow your search</p>
+                </div>
+                <div class="text-center px-4">
+                    <div class="w-14 h-14 sm:w-16 sm:h-16 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl sm:text-3xl font-bold">
+                        3
+                    </div>
+                    <h3 class="text-lg sm:text-xl font-bold mb-2">Apply Instantly</h3>
+                    <p class="text-sm sm:text-base text-slate-300">Direct links to real jobs on top platforms</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SEO Article Section -->
+    <section class="bg-white py-12 sm:py-16 lg:py-20 border-t border-slate-200">
+        <div class="main-container px-4 sm:px-6 lg:px-8">
+            <article class="article-content">
+                <h1>Job Finder Tool - Find Real Jobs Worldwide in One Click | 20+ Countries</h1>
+                
+                <p>In 2026, finding a job shouldn't feel like a full-time job. Yet millions of job seekers waste hours every day visiting dozens of websites, only to encounter outdated listings, fake jobs, scam postings, or dead links. The average person searching for jobs in Pakistan, jobs in India, or jobs in USA opens 8-12 tabs just to check if new opportunities were posted. By the time they finish applying on one platform, the best positions are already filled. This is the problem we decided to solve.</p>
+                
+                <p>The <strong>Job Finder Tool</strong> eliminates confusion by giving you direct job links to every major job portal in 20+ countries. Instead of navigating confusing menus and search filters on each site individually, you type your desired role once here — "Software Engineer", "Police Jobs", "Teaching Jobs", or "Remote Work From Home Jobs" — and instantly get pre-filled search results from LinkedIn, Indeed, Naukri.com, Rozee.pk, JobsAlert.pk, Bayt.com, Seek, and dozens more. Our mission is simple: save your time, show you only real jobs worldwide, and help you apply instantly before anyone else.</p>
+
+                <p>Whether you're looking for government jobs, private jobs, sarkari naukri, or the latest jobs 2026 in your city, this job search engine connects you directly to official sources. No fake postings. No middlemen. No signup required. Just search and apply.</p>
+
+                <h2>Why Job Finder Tool is the Fastest Way to Search Jobs in 2026</h2>
+                
+                <p>The traditional job search process is broken. Here's why job seekers, recruiters, and career experts now recommend using a direct job links aggregator like Job Finder Tool:</p>
+                
+                <ul>
+                    <li><strong>No signup or registration required:</strong> Unlike most job portals that force you to create an account before even viewing listings, our tool is 100% free with zero friction. Search and click — that's it.</li>
+                    <li><strong>Direct links to 20+ countries:</strong> From jobs in Pakistan and jobs in India to jobs in USA, jobs in UK, jobs in UAE, jobs in Saudi Arabia, jobs in Canada, jobs in Australia, and beyond. One search covers the globe.</li>
+                    <li><strong>All major portals in one place:</strong> We include Indeed, LinkedIn, Glassdoor, Naukri.com, Rozee.pk, JobsAlert.pk, Bayt.com, Naukri Gulf, Seek, Reed.co.uk, Job Bank Canada, USAJobs.gov, and 50+ other verified platforms.</li>
+                    <li><strong>Government jobs + private jobs:</strong> Find sarkari naukri via JobsAlert.pk, Sarkari Result, PPSC, FPSC, and USAJobs. Plus access millions of private sector IT jobs, bank jobs, medical jobs, and more.</li>
+                    <li><strong>Mobile friendly job search engine:</strong> 68% of job searches in 2026 happen on mobile. Our interface is fully responsive, so you can search jobs near me while commuting or during lunch breaks.</li>
+                    <li><strong>Location filters that actually work:</strong> Search by country, province, state, or city. Looking for police jobs in Punjab or teacher jobs in Dubai? Get targeted results instantly.</li>
+                    <li><strong>Updated for latest jobs 2026:</strong> We constantly add new job portals and remove dead sites. Every link takes you to live search results on official platforms.</li>
+                    <li><strong>Skip fake jobs and scams:</strong> We only link to established, verified job portals. No MLM schemes, no "pay to apply" scams, no data entry jobs that require fees. Only real jobs worldwide.</li>
+                </ul>
+
+                <h2>How to Find Government & Private Jobs Instantly</h2>
+                
+                <p>Finding both government jobs and private sector opportunities used to require visiting separate websites with different interfaces. Government portals like PPSC, FPSC, and USAJobs.gov have complex filters, while private sites like Naukri.com and LinkedIn require complete profiles. The Job Finder Tool bridges this gap.</p>
+
+                <p><strong>Step 1: Enter your target role.</strong> Be specific. Instead of just "jobs", type "Police Jobs", "Assistant Professor", "Staff Nurse", "Data Entry Jobs", or "Software Developer". The more precise your query, the better your results across all platforms.</p>
+
+                <p><strong>Step 2: Select your country and location.</strong> If you're open to relocation, leave it blank to see jobs worldwide. If you want jobs near me, select your country and add your city. This ensures you see relevant openings from local employers and multinational companies hiring in your region.</p>
+
+                <p><strong>Step 3: Click your preferred portals.</strong> Each card shows direct job links to platforms popular in your selected country. For jobs in Pakistan, you'll see JobsAlert.pk for govt jobs and Rozee.pk for private sector. For jobs in India, you'll get Naukri.com, Indeed India, and Sarkari Result. Click any button to open pre-filled search results instantly.</p>
+
+                <p><strong>Step 4: Apply directly on the source platform.</strong> We never host job applications or collect your resume. When you click, you go straight to the official job portal where you can review details, check eligibility, and apply instantly. This keeps your data secure and ensures you're applying to real employers.</p>
+
+                <h2>Top Job Portals by Country - Complete Guide 2026</h2>
+                
+                <p>Every country has different job search habits and dominant platforms. A job seeker in Karachi needs Rozee.pk and JobsAlert.pk, while someone hunting jobs in London relies on Reed.co.uk and TotalJobs. Here's your complete guide to job portals list by country for 2026:</p>
+
+                <h3>Pakistan</h3>
+                <p><strong>JobsAlert.pk for govt jobs:</strong> Pakistan's most trusted source for government jobs, PPSC, FPSC, NTS, and district administration positions. Covers Punjab, Sindh, KPK, Balochistan, Islamabad, and AJK with daily updates. If you're searching for police jobs, teaching jobs, or patwari jobs in Pakistan, start here.</p>
+                <p><strong>Rozee.pk for private jobs:</strong> The largest private sector job portal with openings from multinational companies, banks, telecoms, and SMEs. Best for IT jobs, marketing roles, accounting, and management positions in Karachi, Lahore, Islamabad.</p>
+                <p><strong>Mustakbil.com & BrightSpyre:</strong> Specialized platforms for engineering, medical jobs, and experienced professionals. Strong coverage for jobs in Punjab and Sindh.</p>
+
+                <h3>India</h3>
+                <p><strong>Naukri.com:</strong> India's No.1 job site with 70M+ resumes. Dominant for IT jobs, software engineer jobs, BPO, and management roles. Covers all states from Delhi to Tamil Nadu to Karnataka.</p>
+                <p><strong>Indeed India:</strong> International platform with strong India presence. Excellent for jobs in Mumbai, Bangalore, Hyderabad, Pune. Shows both government jobs and private jobs in one search.</p>
+                <p><strong>Sarkari Result:</strong> The go-to site for sarkari naukri, railway jobs, bank jobs, SSC, UPSC, and state PSC notifications. Updated hourly with latest jobs 2026 in government sector.</p>
+
+                <h3>USA</h3>
+                <p><strong>Indeed:</strong> Aggregates listings from thousands of company sites. The fastest way to search jobs in USA across all 50 states. Filters for remote work from home jobs and salary data included.</p>
+                <p><strong>LinkedIn:</strong> Essential for professional networking and direct applications. Most Fortune 500 companies post exclusively here. Best for IT jobs, finance, healthcare, and executive roles.</p>
+                <p><strong>USAJobs.gov:</strong> Official portal for federal government jobs including VA, TSA, IRS positions. Requires federal resume format but offers exceptional benefits and stability.</p>
+                <p><strong>Glassdoor:</strong> Combines job listings with company reviews and salary insights. Use it to research employers before applying for jobs near me.</p>
+
+                <h3>UK</h3>
+                <p><strong>Reed.co.uk:</strong> UK's largest job board with 250,000+ vacancies. Strong for teaching jobs, NHS roles, retail, and office positions across England, Scotland, Wales.</p>
+                <p><strong>TotalJobs & CV-Library:</strong> Preferred by UK employers for qualified candidates. Excellent coverage for jobs in London, Manchester, Birmingham.</p>
+                <p><strong>Civil Service Jobs:</strong> Official government jobs portal for UK public sector. Includes police jobs, HMRC, DWP, and NHS non-clinical roles.</p>
+
+                <h3>Canada</h3>
+                <p><strong>Job Bank:</strong> Government of Canada's official job site. Lists 100,000+ positions and includes Labour Market Impact Assessments for foreign workers. Essential for jobs in Ontario, British Columbia, Alberta.</p>
+                <p><strong>Indeed Canada:</strong> Most comprehensive aggregator. Shows bilingual postings for jobs in Quebec and nationwide opportunities.</p>
+
+                <h3>UAE</h3>
+                <p><strong>Bayt.com:</strong> Middle East's leading job site. Dominates jobs in UAE, especially Dubai and Abu Dhabi. Strong for oil & gas, construction, hospitality, retail.</p>
+                <p><strong>Naukri Gulf:</strong> Popular with South Asian expats. Thousands of jobs in UAE for engineers, accountants, nurses, drivers, teachers.</p>
+                <p><strong>LinkedIn UAE:</strong> Growing fast for white-collar jobs in Saudi Arabia and UAE. Best for finance, tech, and multinational roles.</p>
+
+                <h3>Saudi Arabia</h3>
+                <p><strong>Bayt.com & Naukri Gulf:</strong> Both platforms are essential for jobs in Saudi Arabia under Vision 2030. High demand for medical jobs, IT jobs, construction, and education.</p>
+                <p><strong>Mihnati:</strong> Local Saudi portal with Arabic and English listings. Good for jobs in Riyadh, Jeddah, Dammam.</p>
+
+                <h3>Germany</h3>
+                <p><strong>Indeed.de:</strong> Market leader for jobs in Germany. Covers automotive, engineering, healthcare sectors.</p>
+                <p><strong>StepStone:</strong> Premium job board favored by German employers. Many English-speaking IT jobs and management roles.</p>
+                <p><strong>Arbeitsagentur:</strong> Federal Employment Agency site. Mandatory for many visa categories and offers Ausbildung positions.</p>
+
+                <h3>Australia</h3>
+                <p><strong>Seek.com.au:</strong> Australia's dominant job portal with 150,000+ listings. Essential for jobs in Sydney, Melbourne, Brisbane.</p>
+                <p><strong>Indeed Australia:</strong> Strong supplement to Seek, especially for trades, healthcare, and remote jobs.</p>
+                <p><strong>CareerOne:</strong> Focuses on white-collar and government jobs across all Australian states.</p>
+
+                <h3>Qatar, Kuwait, Oman, Bahrain</h3>
+                <p><strong>Naukri Gulf & Bayt:</strong> These two platforms control 80% of jobs in Qatar, jobs in Kuwait, jobs in Oman, and jobs in Bahrain. High demand for medical jobs, engineering, hospitality, and teaching jobs in international schools. Many offer tax-free salaries and accommodation.</p>
+
+                <h3>Malaysia & Singapore</h3>
+                <p><strong>JobStreet:</strong> Dominant in Southeast Asia. Use for jobs in Malaysia and jobs in Singapore across tech, finance, manufacturing.</p>
+                <p><strong>JobsDB & MyCareersFuture:</strong> Singapore government portal lists PMET jobs and SkillsFuture opportunities. Indeed also strong in both markets.</p>
+
+                <h3>South Africa</h3>
+                <p><strong>Careers24 & PNet:</strong> Local leaders for jobs in South Africa. Covers Johannesburg, Cape Town, Durban. Strong mining, finance, IT sectors.</p>
+
+                <h3>Philippines</h3>
+                <p><strong>JobStreet & Indeed:</strong> Primary platforms for jobs in Philippines. High volume of BPO, call center jobs, nurse jobs abroad, seafarer jobs.</p>
+                <p><strong>Kalibrr:</strong> Tech-focused job portal popular with startups and MNCs in Manila.</p>
+
+                <h3>Bangladesh</h3>
+                <p><strong>BDJobs:</strong> Absolute market leader for jobs in Bangladesh. Covers Dhaka, Chittagong, and all divisions.</p>
+                <p><strong>Chakri.com:</strong> Government jobs specialist. Lists BCS, bank jobs, and public sector openings daily.</p>
+
+                <h3>Nigeria</h3>
+                <p><strong>Jobberman:</strong> Nigeria's top job portal with 2M+ candidates. Best for jobs in Lagos, Abuja, Port Harcourt.</p>
+                <p><strong>Indeed Nigeria:</strong> Growing fast, especially for tech, oil & gas, and banking positions.</p>
+
+                <h3>Kenya</h3>
+                <p><strong>BrighterMonday & Fuzu:</strong> Leading sites for jobs in Kenya. Cover Nairobi, Mombasa. Strong NGO, fintech, and agriculture sectors.</p>
+
+                <p>We also support direct job links for <strong>France, Egypt, Jordan, Turkey, Brazil, Mexico, Thailand, Indonesia</strong> and more. As we add new countries, they'll appear in the dropdown automatically. No matter where you are, Job Finder Tool helps you apply instantly on local platforms.</p>
+
+                <h2>Popular Job Categories People Search Daily</h2>
+                
+                <p>Based on search data from 20+ countries, here are the job categories people look for most often. Use these keywords in the Job Finder Tool to get targeted results:</p>
+
+                <ul>
+                    <li><strong>Police Jobs:</strong> Constable, ASI, Sub-Inspector positions. High demand in Pakistan, India, UAE. Search "Police Officer" and select your country to see PPSC, FPSC, and state police recruitment notices.</li>
+                    <li><strong>Teaching Jobs:</strong> School teachers, college lecturers, online tutors, international school positions. Massive demand for jobs in Saudi Arabia, Qatar, UAE. Use "Teacher" or "Lecturer" keywords.</li>
+                    <li><strong>IT Software Engineer Jobs:</strong> Full stack developer, data scientist, cloud engineer, cybersecurity. Highest paying jobs in USA, Germany, Canada, Singapore. Remote work from home jobs common.</li>
+                    <li><strong>Doctor Medical Jobs:</strong> MBBS, specialists, surgeons, general practitioners. Critical shortage in UK NHS, Saudi Arabia, UAE, Canada. Search "Doctor" or "Physician".</li>
+                    <li><strong>Nurse Jobs:</strong> Registered nurses, OTs, midwives. High migration from Philippines, India, Kenya to UK, Germany, Australia. Many offer visa sponsorship.</li>
+                    <li><strong>Bank Jobs:</strong> Clerk, PO, relationship manager, investment banking. Check sarkari naukri portals for government bank jobs or private bank careers pages.</li>
+                    <li><strong>Driver Jobs:</strong> Heavy vehicle, delivery, taxi, chauffeur. Huge demand in UAE, Saudi Arabia, Qatar with visa provided. Search "Driver" + country.</li>
+                    <li><strong>Data Entry Jobs:</strong> Typing, transcription, remote jobs. Be cautious of scams. Only apply via verified portals like Indeed or LinkedIn.</li>
+                    <li><strong>Remote Work From Home Jobs:</strong> Customer service, content writing, virtual assistant, online teaching. Use "Remote" keyword and filter location to "Remote" on Indeed/LinkedIn.</li>
+                    <li><strong>Accountant Jobs:</strong> CA, ACCA, CPA, bookkeeper. Universal demand across all countries for finance and audit positions.</li>
+                </ul>
+
+                <p>Pro tip: Combine keywords for better results. Instead of just "Engineer", try "Civil Engineer Jobs in Dubai" or "Mechanical Engineer Saudi Arabia". Add your city for jobs near me results that match your commute.</p>
+
+                <h2>Tips to Get Hired Fast Using Job Finder Tool</h2>
+                
+                <p>Having direct job links is only half the battle. Here's how to convert searches into interviews in 2026:</p>
+
+                <ul>
+                    <li><strong>Apply within 48 hours:</strong> Recruiters get 250+ applications per posting. Early applicants are 4x more likely to get interviewed. Set daily alerts using your search terms.</li>
+                    <li><strong>Tailor your resume per country:</strong> A CV for jobs in USA needs a summary and no photo. Jobs in Germany expect photo, birthdate, and signatures. Jobs in UAE list nationality and visa status. Customize before applying.</li>
+                    <li><strong>Use LinkedIn alongside portals:</strong> 87% of recruiters check LinkedIn before calling. After applying via Indeed or Naukri.com, connect with the hiring manager on LinkedIn with a personal note.</li>
+                    <li><strong>Track government jobs separately:</strong> Sarkari naukri have strict deadlines and multiple test stages. Use JobsAlert.pk or Sarkari Result for calendar reminders so you never miss PPSC or UPSC dates.</li>
+                    <li><strong>Optimize for ATS keywords:</strong> Job portals use Applicant Tracking Systems. Mirror exact phrases from the job description. If they want "Police Officer", don't write "Law Enforcement Professional".</li>
+                    <li><strong>Check jobs near me first:</strong> Local employers prefer candidates who can start immediately. Filter by city before expanding to nationwide or remote jobs.</li>
+                    <li><strong>Prepare for video interviews:</strong> 80% of first-round interviews in 2026 are on Zoom or Teams. Test your camera, lighting, and background before the call.</li>
+                </ul>
+
+                <h2>Frequently Asked Questions</h2>
+
+                <h3>Is Job Finder Tool free to use?</h3>
+                <p>Yes, 100% free forever. We never charge job seekers. Our tool simply provides direct job links to official portals. You apply on their platforms, so we never collect your personal data, resume, or payment details. Bookmark this page and share it — no signup or hidden costs.</p>
+
+                <h3>Do you post fake jobs or collect resumes?</h3>
+                <p>Absolutely not. We are a job search engine, not a recruitment agency. We don't host job postings, collect resumes, or promise placements. Every link takes you to established platforms like Indeed, LinkedIn, Naukri.com, Rozee.pk, or government sites. This protects you from fake jobs and scam listings that plague social media.</p>
+
+                <h3>Which countries are supported in 2026?</h3>
+                <p>Currently 20+ countries: Pakistan, India, USA, UK, Canada, UAE, Saudi Arabia, Germany, Australia, Singapore, Qatar, Kuwait, Oman, Bahrain, Malaysia, South Africa, Philippines, Bangladesh, Nigeria, Kenya, France, and more. We add new job portals list entries every month based on user requests.</p>
+
+                <h3>How to search police jobs in Pakistan?</h3>
+                <p>Enter "Police Officer" or "ASI Jobs" in the search box. Select "Pakistan" from country dropdown and optionally choose Punjab, Sindh, or KPK. The tool will generate direct job links to JobsAlert.pk — which lists all PPSC police recruitment — and Rozee.pk for private security roles. Click any link to view latest jobs 2026 and apply instantly on their official portal.</p>
+
+                <h3>Can I find remote work from home jobs?</h3>
+                <p>Yes. Type "Remote" or "Work From Home" in the job title field. Most platforms like LinkedIn and Indeed have dedicated remote filters. For best results, leave country blank to see jobs worldwide that accept international applicants, then filter by time zone compatibility.</p>
+
+                <h3>What's the difference between government jobs and private jobs listings?</h3>
+                <p>Government jobs or sarkari naukri are on official portals like JobsAlert.pk, Sarkari Result, USAJobs.gov with fixed pay scales, pensions, and longer application processes. Private jobs on Rozee.pk, Naukri.com, LinkedIn often have higher salaries, faster hiring, but less job security. Job Finder Tool shows both types so you can compare and apply to what fits your career goals.</p>
+
+                <h2>Conclusion: Your Next Job is One Click Away</h2>
+                
+                <p>Stop wasting time jumping between 15 tabs, retyping the same search, or falling for fake jobs on Telegram and Facebook groups. The <strong>Job Finder Tool</strong> was built because job seekers deserve a faster, safer, smarter way to find real jobs worldwide.</p>
+
+                <p>Whether you're a fresh graduate looking for entry-level private jobs, an experienced professional seeking IT jobs abroad, a nurse exploring medical jobs in Saudi Arabia, or someone hunting police jobs and teaching jobs in your home country — this tool gives you direct job links to every major platform without signup, fees, or spam.</p>
+
+                <p>With coverage for jobs in Pakistan, jobs in India, jobs in USA, jobs in UK, jobs in UAE, jobs in Saudi Arabia, and 15+ other countries, plus daily updates for latest jobs 2026, you have everything needed to launch your job search engine experience from one simple page.</p>
+
+                <p>Scroll back to the top, enter your dream role, and click "Find Jobs Directly". In seconds, you'll have pre-filled search results across LinkedIn, Indeed, Naukri.com, Rozee.pk, JobsAlert.pk, Bayt.com, and more. Apply instantly, apply early, and get hired faster.</p>
+
+                <p><strong>Your career upgrade starts now. Use the Job Finder Tool above and take control of your job search today.</strong></p>
+            </article>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 text-slate-400 py-6 sm:py-8">
+        <div class="main-container px-4 sm:px-6 lg:px-8 text-center">
+            <p class="text-xs sm:text-sm font-medium">Job Finder Tool · Direct Search · Always Free</p>
+            <p class="text-xs mt-2 text-slate-500 px-4">We redirect to official job portals. Not affiliated with any job site.</p>
+        </div>
+    </footer>
+
+<script>
+const countriesData = {
+    "Pakistan": {
+        flag: "🇵🇰",
+        states: ["Punjab", "Sindh", "KPK", "Balochistan", "Islamabad", "Gilgit-Baltistan", "AJK"],
+        portals: [
+            { 
+                name: "JobsAlert.pk", 
+                logo: "JA", 
+                color: "#3B82F6",
+                searchUrl: "https://jobsalert.pk/?s=",
+                desc: "Government & Private Jobs"
+            },
+            { 
+                name: "Rozee.pk", 
+                logo: "RZ", 
+                color: "#10B981",
+                searchUrl: "https://rozee.pk/job/jsearch/q/",
+                desc: "Pakistan's Leading Job Site"
+            },
+            { 
+                name: "Mustakbil.com", 
+                logo: "MB", 
+                color: "#F59E0B",
+                searchUrl: "https://mustakbil.com/jobs/search?q=",
+                desc: "Top Jobs in Pakistan"
+            },
+            { 
+                name: "BrightSpyre", 
+                logo: "BS", 
+                color: "#8B5CF6",
+                searchUrl: "https://brightspyre.com/search?q=",
+                desc: "Professional Network"
+            },
+            { 
+                name: "LinkedIn", 
+                logo: "LI", 
+                color: "#0A66C2",
+                searchUrl: "https://www.linkedin.com/jobs/search/?keywords=",
+                desc: "Global Professional Network"
+            }
+        ]
+    },
+    "India": {
+        flag: "🇮🇳",
+        states: ["Delhi", "Maharashtra", "Karnataka", "Tamil Nadu", "Uttar Pradesh", "Gujarat", "West Bengal", "Telangana", "Rajasthan", "Punjab", "Haryana", "Kerala"],
+        portals: [
+            { 
+                name: "Naukri.com", 
+                logo: "NK", 
+                color: "#0EA5E9",
+                searchUrl: "https://www.naukri.com/",
+                searchSuffix: "-jobs",
+                desc: "India's No.1 Job Site"
+            },
+            { 
+                name: "Indeed India", 
+                logo: "IN", 
+                color: "#2563EB",
+                searchUrl: "https://in.indeed.com/jobs?q=",
+                desc: "Millions of Jobs"
+            },
+            { 
+                name: "Sarkari Result", 
+                logo: "SR", 
+                color: "#DC2626",
+                searchUrl: "https://sarkariresult.com/search/?q=",
+                desc: "Government Jobs"
+            },
+            { 
+                name: "LinkedIn", 
+                logo: "LI", 
+                color: "#0A66C2",
+                searchUrl: "https://in.linkedin.com/jobs/search/?keywords=",
+                desc: "Professional Network"
+            },
+            { 
+                name: "Shine.com", 
+                logo: "SH", 
+                color: "#EC4899",
+                searchUrl: "https://www.shine.com/job-search/",
+                searchSuffix: "-jobs",
+                desc: "Top Companies Hiring"
+            }
+        ]
+    },
+    "USA": {
+        flag: "🇺🇸",
+        states: ["California", "Texas", "Florida", "New York", "Illinois", "Pennsylvania", "Ohio", "Georgia", "North Carolina", "Michigan", "New Jersey", "Virginia"],
+        portals: [
+            { 
+                name: "Indeed", 
+                logo: "IN", 
+                color: "#2563EB",
+                searchUrl: "https://www.indeed.com/jobs?q=",
+                desc: "World's #1 Job Site"
+            },
+            { 
+                name: "LinkedIn", 
+                logo: "LI", 
+                color: "#0A66C2",
+                searchUrl: "https://www.linkedin.com/jobs/search/?keywords=",
+                desc: "Professional Network"
+            },
+            { 
+                name: "Glassdoor", 
+                logo: "GD", 
+                color: "#0CAA41",
+                searchUrl: "https://www.glassdoor.com/Job/jobs.htm?sc.keyword=",
+                desc: "Jobs & Company Reviews"
+            },
+            { 
+                name: "ZipRecruiter", 
+                logo: "ZR", 
+                color: "#00A652",
+                searchUrl: "https://www.ziprecruiter.com/jobs/search?q=",
+                desc: "Job Search Made Simple"
+            },
+            { 
+                name: "USAJobs", 
+                logo: "US", 
+                color: "#1E40AF",
+                searchUrl: "https://www.usajobs.gov/Search/Results?k=",
+                desc: "Federal Government Jobs"
+            }
+        ]
+    },
+    "UK": {
+        flag: "🇬🇧",
+        states: ["England", "Scotland", "Wales", "Northern Ireland", "London", "Manchester", "Birmingham"],
+        portals: [
+            { 
+                name: "Reed.co.uk", 
+                logo: "RD", 
+                color: "#DC2626",
+                searchUrl: "https://www.reed.co.uk/jobs/",
+                searchSuffix: "-jobs",
+                desc: "UK's #1 Job Site"
+            },
+            { 
+                name: "Indeed UK", 
+                logo: "IN", 
+                color: "#2563EB",
+                searchUrl: "https://uk.indeed.com/jobs?q=",
+                desc: "Search All Jobs"
+            },
+            { 
+                name: "TotalJobs", 
+                logo: "TJ", 
+                color: "#059669",
+                searchUrl: "https://www.totaljobs.com/jobs/",
+                desc: "Find Your Next Role"
+            },
+            { 
+                name: "CV-Library", 
+                logo: "CV", 
+                color: "#7C3AED",
+                searchUrl: "https://www.cv-library.co.uk/search-jobs?search=",
+                desc: "UK's Leading Job Board"
+            }
+        ]
+    },
+    "Canada": {
+        flag: "🇨🇦",
+        states: ["Ontario", "Quebec", "British Columbia", "Alberta", "Manitoba", "Saskatchewan", "Nova Scotia"],
+        portals: [
+            { 
+                name: "Indeed Canada", 
+                logo: "IN", 
+                color: "#2563EB",
+                searchUrl: "https://ca.indeed.com/jobs?q=",
+                desc: "Jobs Across Canada"
+            },
+            { 
+                name: "Job Bank", 
+                logo: "JB", 
+                color: "#DC2626",
+                searchUrl: "https://www.jobbank.gc.ca/jobsearch/jobsearch?searchstring=",
+                desc: "Government of Canada"
+            },
+            { 
+                name: "LinkedIn", 
+                logo: "LI", 
+                color: "#0A66C2",
+                searchUrl: "https://ca.linkedin.com/jobs/search/?keywords=",
+                desc: "Professional Network"
+            },
+            { 
+                name: "Workopolis", 
+                logo: "WP", 
+                color: "#EA580C",
+                searchUrl: "https://www.workopolis.com/jobsearch/",
+                searchSuffix: "-jobs",
+                desc: "Canada's Job Board"
+            }
+        ]
+    },
+    "UAE": {
+        flag: "🇦🇪",
+        states: ["Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Ras Al Khaimah", "Fujairah", "Umm Al Quwain"],
+        portals: [
+            { 
+                name: "Bayt.com", 
+                logo: "BT", 
+                color: "#0891B2",
+                searchUrl: "https://www.bayt.com/en/uae/jobs/",
+                searchSuffix: "-jobs/",
+                desc: "Middle East Job Site"
+            },
+            { 
+                name: "Naukri Gulf", 
+                logo: "NG", 
+                color: "#0EA5E9",
+                searchUrl: "https://www.naukrigulf.com/",
+                searchSuffix: "-jobs-in-uae",
+                desc: "Gulf Jobs & Careers"
+            },
+            { 
+                name: "Gulf Talent", 
+                logo: "GT", 
+                color: "#7C3AED",
+                searchUrl: "https://www.gulftalent.com/uae/jobs/title/",
+                desc: "Top Employers in UAE"
+            },
+            { 
+                name: "Indeed UAE", 
+                logo: "IN", 
+                color: "#2563EB",
+                searchUrl: "https://ae.indeed.com/jobs?q=",
+                desc: "Jobs in UAE"
+            }
+        ]
+    },
+    "Saudi Arabia": {
+        flag: "🇸🇦",
+        states: ["Riyadh", "Jeddah", "Mecca", "Medina", "Dammam", "Khobar", "Tabuk"],
+        portals: [
+            { 
+                name: "Bayt.com", 
+                logo: "BT", 
+                color: "#0891B2",
+                searchUrl: "https://www.bayt.com/en/saudi-arabia/jobs/",
+                searchSuffix: "-jobs/",
+                desc: "Middle East Job Site"
+            },
+            { 
+                name: "Naukri Gulf", 
+                logo: "NG", 
+                color: "#0EA5E9",
+                searchUrl: "https://www.naukrigulf.com/",
+                searchSuffix: "-jobs-in-saudi-arabia",
+                desc: "Saudi Arabia Jobs"
+            },
+            { 
+                name: "Mihnati", 
+                logo: "MH", 
+                color: "#16A34A",
+                searchUrl: "https://www.mihnati.com/search?q=",
+                desc: "Saudi Job Portal"
+            }
+        ]
+    },
+    "Germany": {
+        flag: "🇩🇪",
+        states: ["Bavaria", "Berlin", "Hamburg", "Hesse", "North Rhine-Westphalia", "Saxony"],
+        portals: [
+            { 
+                name: "Indeed Germany", 
+                logo: "IN", 
+                color: "#2563EB",
+                searchUrl: "https://de.indeed.com/jobs?q=",
+                desc: "Stellenangebote"
+            },
+            { 
+                name: "StepStone", 
+                logo: "ST", 
+                color: "#EA580C",
+                searchUrl: "https://www.stepstone.de/jobs/",
+                desc: "Deutschlands Jobbörse"
+            },
+            { 
+                name: "XING Jobs", 
+                logo: "XG", 
+                color: "#006567",
+                searchUrl: "https://www.xing.com/jobs/search?keywords=",
+                desc: "Professional Network"
+            }
+        ]
+    },
+    "Australia": {
+        flag: "🇦🇺",
+        states: ["New South Wales", "Victoria", "Queensland", "Western Australia", "South Australia", "Tasmania"],
+        portals: [
+            { 
+                name: "Seek", 
+                logo: "SK", 
+                color: "#E60028",
+                searchUrl: "https://www.seek.com.au/",
+                searchSuffix: "-jobs",
+                desc: "Australia's #1 Job Site"
+            },
+            { 
+                name: "Indeed Australia", 
+                logo: "IN", 
+                color: "#2563EB",
+                searchUrl: "https://au.indeed.com/jobs?q=",
+                desc: "Jobs Across Australia"
+            },
+            { 
+                name: "Jora", 
+                logo: "JR", 
+                color: "#FF6000",
+                searchUrl: "https://au.jora.com/j?q=",
+                desc: "Search All Jobs"
+            }
+        ]
+    },
+    "Singapore": {
+        flag: "🇸🇬",
+        states: ["Central Region", "East Region", "North-East Region", "West Region"],
+        portals: [
+            { 
+                name: "JobStreet SG", 
+                logo: "JS", 
+                color: "#1E40AF",
+                searchUrl: "https://www.jobstreet.com.sg/jobs",
+                desc: "Leading Job Site"
+            },
+            { 
+                name: "JobsDB", 
+                logo: "JD", 
+                color: "#DC2626",
+                searchUrl: "https://sg.jobsdb.com/jobs?q=",
+                desc: "Singapore Jobs"
+            },
+            { 
+                name: "MyCareersFuture", 
+                logo: "MC", 
+                color: "#16A34A",
+                searchUrl: "https://www.mycareersfuture.gov.sg/search?search=",
+                desc: "Government Portal"
+            }
+        ]
+    },
+    "France": {
+        flag: "🇫🇷",
+        states: ["Île-de-France", "Auvergne-Rhône-Alpes", "Hauts-de-France", "Grand Est", "Occitanie"],
+        portals: [
+            { 
+                name: "Indeed France", 
+                logo: "IN", 
+                color: "#2563EB",
+                searchUrl: "https://fr.indeed.com/jobs?q=",
+                desc: "Offres d'emploi"
+            },
+            { 
+                name: "LinkedIn", 
+                logo: "LI", 
+                color: "#0A66C2",
+                searchUrl: "https://fr.linkedin.com/jobs/search/?keywords=",
+                desc: "Réseau Professionnel"
+            }
+        ]
+    }
+};
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    populateCountries();
+    document.getElementById('countrySelect').addEventListener('change', onCountryChange);
+});
+
+function populateCountries() {
+    const select = document.getElementById('countrySelect');
+    const countries = Object.keys(countriesData).sort();
+    
+    countries.forEach(country => {
+        const option = document.createElement('option');
+        option.value = country;
+        option.textContent = `${countriesData[country].flag} ${country}`;
+        select.appendChild(option);
+    });
+}
+
+function onCountryChange(e) {
+    const country = e.target.value;
+    const stateSelect = document.getElementById('stateSelect');
+    stateSelect.innerHTML = '<option value="">Any Location</option>';
+    
+    if (country && countriesData[country]) {
+        countriesData[country].states.forEach(state => {
+            const option = document.createElement('option');
+            option.value = state;
+            option.textContent = state;
+            stateSelect.appendChild(option);
+        });
+    }
+}
+
+function quickSearch(jobTitle) {
+    document.getElementById('jobTitle').value = jobTitle;
+    document.getElementById('jobTitle').focus();
+}
+
+function searchJobs() {
+    const jobTitle = document.getElementById('jobTitle').value.trim();
+    const country = document.getElementById('countrySelect').value;
+    const state = document.getElementById('stateSelect').value;
+    const city = document.getElementById('cityInput').value.trim();
+    const experience = document.getElementById('experienceSelect').value;
+    
+    if (!jobTitle) {
+        alert('Please enter a job title or skill');
+        document.getElementById('jobTitle').focus();
+        return;
+    }
+    
+    let results = [];
+    
+    if (country && countriesData[country]) {
+        // Search in specific country
+        results = generateLinksForCountry(country, jobTitle, state, city, experience);
+    } else {
+        // Search in all countries
+        Object.keys(countriesData).forEach(c => {
+            results = results.concat(generateLinksForCountry(c, jobTitle, state, city, experience));
+        });
+    }
+    
+    displayResults(results, jobTitle, country, state, city);
+}
+
+function generateLinksForCountry(country, jobTitle, state, city, experience) {
+    const data = countriesData[country];
+    const searchQuery = encodeURIComponent(jobTitle);
+    const locationQuery = city || state || '';
+    
+    return data.portals.map(portal => {
+        let url = portal.searchUrl + searchQuery;
+        
+        // Add suffix if needed (some portals use different URL structure)
+        if (portal.searchSuffix) {
+            // Replace spaces with hyphens for URL-friendly format
+            const urlJobTitle = jobTitle.toLowerCase().replace(/\s+/g, '-');
+            url = portal.searchUrl + urlJobTitle + portal.searchSuffix;
+        }
+        
+        // Add location if specified
+        if (locationQuery) {
+            if (portal.searchUrl.includes('indeed.com')) {
+                url += '&l=' + encodeURIComponent(locationQuery);
+            } else if (portal.searchUrl.includes('linkedin.com')) {
+                url += '&location=' + encodeURIComponent(locationQuery);
+            }
+        }
+        
+        return {
+            portal: portal.name,
+            logo: portal.logo,
+            color: portal.color,
+            desc: portal.desc,
+            url: url,
+            country: country,
+            state: state
+        };
+    });
+}
+
+function displayResults(results, jobTitle, country, state, city) {
+    const resultsSection = document.getElementById('resultsSection');
+    const resultsGrid = document.getElementById('resultsGrid');
+    
+    let locationText = country || 'Worldwide';
+    if (city) locationText = city + ', ' + locationText;
+    else if (state) locationText = state + ', ' + locationText;
+    
+    resultsGrid.innerHTML = results.map(result => `
+        <div class="portal-card bg-white rounded-2xl shadow-md p-4 sm:p-6 animate-slide-up">
+            <div class="flex items-start space-x-3 sm:space-x-4 mb-4">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0" style="background: ${result.color}">
+                    ${result.logo}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h4 class="text-base sm:text-lg font-bold text-gray-900 truncate">${result.portal}</h4>
+                    <p class="text-xs text-gray-500">${result.desc}</p>
+                    <p class="text-xs text-gray-400 mt-1">${result.country}</p>
+                </div>
+            </div>
+            <a href="${result.url}" target="_blank" rel="noopener noreferrer"
+                class="w-full flex items-center justify-center px-4 py-3 rounded-xl text-white font-semibold transition-all hover:shadow-lg text-sm sm:text-base"
+                style="background: ${result.color}">
+                <i class="fas fa-external-link-alt mr-2"></i>
+                <span class="truncate">Search ${jobTitle}</span>
+            </a>
+        </div>
+    `).join('');
+    
+    resultsSection.classList.remove('hidden');
+    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function clearResults() {
+    document.getElementById('resultsSection').classList.add('hidden');
+    document.getElementById('jobTitle').value = '';
+    document.getElementById('countrySelect').value = '';
+    document.getElementById('stateSelect').innerHTML = '<option value="">Any Location</option>';
+    document.getElementById('cityInput').value = '';
+    document.getElementById('experienceSelect').value = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+<script>(function(){document.addEventListener("click",function(e){var a=e.target.closest("[data-product-id]");if(!a)return;e.preventDefault();var pid=a.getAttribute("data-product-id");if(pid)parent.postMessage({type:"ecto-artifact-link-click",productId:pid},"*")})})();</script>
+</body>
+</html>
